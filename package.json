@@ -1,0 +1,9 @@
+{
+  "name": "sc-app-dev",
+  "scripts": {
+    "start": "NODE_ENV=development electron app"
+  },
+  "devDependencies": {
+    "electron-devtools-installer": "^2.1.0"
+  }
+}

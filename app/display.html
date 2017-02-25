@@ -1,0 +1,154 @@
+<!doctype html>
+<meta charset="utf-8">
+
+<link rel="stylesheet" href="http://pespantelis.github.io/vue-crop/css/Jcrop.min.css">
+<style>
+html {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+body {
+  margin: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  -webkit-user-select: none;
+}
+#container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+#editor {
+  position: absolute;
+  left: -99999px;
+  top: -99999px;
+}
+#image {
+  flex: 1;
+  display: block;
+}
+#overlay {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, .2);
+}
+</style>
+
+<div id="container" @keydown.enter="handleCropFinish">
+  <div id="editor" ref="editor"
+    contenteditable @paste="handlePaste"></div>
+  <div ref="imageWrap">
+    <img id="image"
+      :width="winWidth"
+      :height="winHeight"
+      @load="handleImageLoad">
+  </div>
+  <div id="overlay"></div>
+  <canvas hidden id="canvas" ref="canvas"></canvas>
+</div>
+
+<!-- dev version of Vue for debuging -->
+<script src="https://vuejs.org/js/vue.js"></script>
+<script src="https://code.jquery.com/jquery-3.1.1.min.js"></script>
+<script src="http://pespantelis.github.io/vue-crop/js/Jcrop.min.js"></script>
+<script src="vue-crop.js"></script>
+
+<script>
+const { clipboard, nativeImage, ipcRenderer } = window
+
+// todo: better vue-crop library
+// http://pespantelis.github.io/vue-crop/
+let defaultCoords = [25, 25, 250, 250]
+let cropEvents = ['create', 'start', 'end', 'move']
+
+new Vue({
+  el: '#container',
+  data () {
+    return {
+      winWidth: window.innerWidth,
+      winHeight: window.innerHeight,
+      imageURL: null,
+      jcrop: null,
+      coords: defaultCoords
+    }
+  },
+
+  created () {
+    // todo: use electron clipboard api instead
+    ipcRenderer.on('paste-ready', this.handlePasteReady)
+  },
+  mounted () {
+    let { imageWrap } = this.$refs
+    imageWrap.style.width = this.winWidth
+    imageWrap.style.height = this.winHeight
+    let jcrop = $.Jcrop.attach($(imageWrap), {
+      setSelect: this.coords
+    })
+    cropEvents.forEach(k => {
+      jcrop.container.on(`crop${k}`, this.handleCropChange)
+    })
+    this.jcrop = jcrop
+    // let { image } = this.$refs
+    // let $image = $(image)
+    // $image.Jcrop({
+    //   setSelect: this.coords
+    // })
+  },
+  beforeDestroy () {
+    cropEvents.forEach(k => {
+      this.jcrop.container.off(`crop${k}`)
+    })
+    this.jcrop.destroy()
+    this.jcrop = null
+    ipcRenderer.removeListener('paste-ready', this.handlePasteReady)
+  },
+
+  methods: {
+    handleCropFinish () {
+      let { x, y, w, h } = this.coords
+      let { canvas } = this.$refs
+      canvas.setAttribute('width', w)
+      canvas.setAttribute('height', h)
+      let ctx = canvas.getContext('2d')
+
+      let img = new Image()
+      img.src = this.imageURL
+      ctx.drawImage(img, x, y, w, h, 0, 0, w, h)
+      let dataURL = canvas.toDataURL('image/png')
+
+      let nImg = nativeImage.createFromDataURL(dataURL)
+      clipboard.writeImage(nImg)
+      ipcRenderer.send('crop-finish')
+      window.close()
+    },
+    handleCropChange (event, selection, coordinates) {
+      this.coords = coordinates
+    },
+
+    handleImageLoad () {
+      ipcRenderer.send('display-ready')
+    },
+    // todo: create blob from nativeImage pngBuffer
+    // https://developer.mozilla.org/en-US/docs/Web/API/Blob
+    handlePaste (e) {
+      e.preventDefault()
+      let clipboardData = e.clipboardData
+      let index = clipboardData.types.indexOf('Files')
+      let item = clipboardData.items[index]
+      if (item && item.type.startsWith('image/')) {
+        let blob = item.getAsFile()
+        let url = URL.createObjectURL(blob)
+        this.imageURL = url
+        image.src = url
+      }
+    },
+    handlePasteReady () {
+      this.$refs.editor.focus()
+      document.execCommand('paste')
+    }
+  }
+})
+</script>
